@@ -22,6 +22,12 @@ limitations under the License.
 
 *************************************************************************************/
 
+
+#include <opencv2/core.hpp>
+// #include <opencv2/videoio/videoio_c.h>
+#include <opencv2/videoio.hpp>
+#include <opencv2/highgui.hpp>
+
 #include "OVR.h"
 
 #include "../CommonSrc/Platform/Platform_Default.h"
@@ -30,13 +36,9 @@ limitations under the License.
 #include "../CommonSrc/Render/Render_FontEmbed_DejaVu48.h"
 #include "../CommonSrc/Platform/Gamepad.h"
 
-#include <opencv/cv.h>
-#include <opencv/highgui.h>
-
 using namespace OVR;
 using namespace OVR::Platform;
 using namespace OVR::Render;
-
 
 class OculusWorldDemoApp : public Application
 {
@@ -100,8 +102,9 @@ protected:
     double              NextFPSUpdate;
 
 	// FPV
-	CvCapture* capture;
-	IplImage * lastFrame;
+	bool isOpen = false;
+	cv::VideoCapture capture;
+	cv::Mat lastFrame;
 
     // Loading process displays screenshot in first frame
     // and then proceeds to load until finished.
@@ -647,20 +650,24 @@ static void DrawTextBox(RenderDevice* prender, float x, float y,
 
 void OculusWorldDemoApp::GrabFrame() {
 	// if not capturing init the capture!
-	if(!capture) {
-		capture = cvCaptureFromCAM( CV_CAP_ANY );
-		if ( !capture ) {
+	if(!isOpen) {
+		isOpen = true;
+		// capture = cvCaptureFromCAM( CV_CAP_ANY );
+		capture = capture.open(1, cv::CAP_ANY);
+		if ( !capture.isOpened() ) {
 		     fprintf( stderr, "ERROR: capture is NULL \n" );
 		     getchar();
 		}
 	}
 
-	lastFrame = cvQueryFrame( capture );
+	capture.read(lastFrame);
 
-	if ( !lastFrame ) {
+	if ( lastFrame.empty() ) {
 		fprintf( stderr, "ERROR: frame is null...\n" );
 	}
 }
+
+char * imageData;
 
 void OculusWorldDemoApp::Render(const StereoEyeParams& stereo)
 {
@@ -670,7 +677,7 @@ void OculusWorldDemoApp::Render(const StereoEyeParams& stereo)
     pRender->BeginScene(PostProcess);
 
     // *** 3D - Configures Viewport/Projection and Render
-    pRender->ApplyStereoParams(stereo);    
+    pRender->ApplyStereoParams(stereo);
     pRender->Clear();
 
     pRender->SetDepthMode(true, true);
@@ -696,25 +703,28 @@ void OculusWorldDemoApp::Render(const StereoEyeParams& stereo)
         LoadingState = LoadingState_DoLoad;
     }
 
+	if(!imageData) {
+		imageData = (char *)malloc(lastFrame.cols * lastFrame.rows * 4);
+	}
 
-	char * imageData = (char *)malloc(lastFrame->width * lastFrame->height * 4);
+	// char * imageData = (char *)malloc(lastFrame.cols * lastFrame.rows * 4);
 
 	int pointer = 0;
 	int c = 0;
-	while(c < lastFrame->width * lastFrame->height * 3) {
-		imageData[pointer++] = lastFrame->imageData[(c++)+2];
-		imageData[pointer++] = lastFrame->imageData[c++];
-		imageData[pointer++] = lastFrame->imageData[(c++)-2];
+	while(c < lastFrame.cols * lastFrame.rows * 3) {
+		imageData[pointer++] = lastFrame.data[(c++)+2];
+		imageData[pointer++] = lastFrame.data[c++];
+		imageData[pointer++] = lastFrame.data[(c++)-2];
 		imageData[pointer++] = 0xFF;
 	}
 
-    Texture* tex = pRender->CreateTexture(Texture_RGBA, lastFrame->width, lastFrame->height, imageData, 1);
+    Texture* tex = pRender->CreateTexture(Texture_RGBA, lastFrame.cols, lastFrame.rows, imageData, 1);
     ShaderFill* image = (ShaderFill*)pRender->CreateTextureFill(tex, false);
     pRender->RenderImage(-pictureSize, -pictureSize, pictureSize, pictureSize, image, 255);
 
 	delete image;
 	delete tex;
-	free(imageData);
+// 	free(imageData);
 
     if(!AdjustMessage.IsEmpty() && AdjustMessageTimeout > pPlatform->GetAppTime())
     {
